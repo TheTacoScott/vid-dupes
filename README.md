@@ -48,6 +48,10 @@ python manage_non_matches.py --db ~/videos.db add <md5a> <md5b>
 python merge_db.py a.db b.db --target combined.db
 ```
 
+## AI disclosure
+
+Used AI to help debug some numpy oddities. Did I need to do that? For my sanity: yes.
+
 ## Database
 
 Three tables:
