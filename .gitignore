@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.db
+.claude/
+populate_db.sh
+random_populate_db.sh
