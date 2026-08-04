@@ -4,6 +4,7 @@
 import argparse
 import collections
 import os
+import random
 import concurrent.futures
 import hashlib
 import json
@@ -304,6 +305,8 @@ def main():
                         help="Run --prune-videos then --prune-hashes, then exit")
     parser.add_argument('--ignore', metavar='DIR', action='append', default=[],
                         help="Ignore files under this path (repeatable)")
+    parser.add_argument('--shuffle', action='store_true',
+                        help="Process files in random order instead of alphabetical")
     parser.add_argument('-v', '--verbose', action='store_true',
                         help="Print per-file status details")
     args = parser.parse_args()
@@ -357,6 +360,8 @@ def main():
         if len(found) % 1000 == 0:
             print(f"  {len(found)} found so far...")
     videos = sorted(found)
+    if args.shuffle:
+        random.shuffle(videos)
     if not videos:
         print("No video files found.")
         return
