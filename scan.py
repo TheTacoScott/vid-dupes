@@ -153,19 +153,15 @@ def _seek_one_frame(path: str, timestamp: float) -> bytes | None:
         return None
 
 
-def extract_frame_hashes(path: str, duration: float, nb_frames: int, num_samples: int) -> list[int] | None:
+def extract_frame_hashes(path: str, duration: float, num_samples: int) -> list[int] | None:
     """
     Extract num_samples equally-spaced frames via parallel seeks and return their phash values.
 
     Up to FFMPEG_WORKERS seeks run concurrently. Progress is tracked as futures return;
     each individual seek is bounded by FRAME_IDLE_TIMEOUT.
     """
-    actual_samples = num_samples
-    if nb_frames > 0 and nb_frames < num_samples:
-        actual_samples = nb_frames
-
-    interval = duration / actual_samples if actual_samples > 1 else duration
-    timestamps = [(i + 0.5) * interval for i in range(actual_samples)]
+    interval = duration / num_samples if num_samples > 1 else duration
+    timestamps = [(i + 0.5) * interval for i in range(num_samples)]
 
     frame_bytes = FRAME_SIZE * FRAME_SIZE * 3
     results: dict[int, int] = {}
@@ -193,12 +189,12 @@ def extract_frame_hashes(path: str, duration: float, nb_frames: int, num_samples
             completed += 1
             elapsed = time.monotonic() - start_time
             fps = completed / elapsed if elapsed > 0 else 0.0
-            remaining = actual_samples - completed
+            remaining = num_samples - completed
             file_eta = fmt_eta(remaining / fps) if fps > 0 and remaining > 0 else ''
             if completed == 1:
                 print(file=sys.stderr)  # move past the stdout path line before first update
             eta_part = f'  eta {file_eta}' if file_eta else ''
-            print(f'\r    frame {completed}/{actual_samples}  ({fps:.1f} fps){eta_part}\033[K', end='', flush=True, file=sys.stderr)
+            print(f'\r    frame {completed}/{num_samples}  ({fps:.1f} fps){eta_part}\033[K', end='', flush=True, file=sys.stderr)
 
     if results:
         print(file=sys.stderr)
@@ -260,7 +256,7 @@ def scan_file(conn: sqlite3.Connection, path: Path, num_frames: int, verbose: bo
     ).fetchone() is not None
 
     if not has_hashes:
-        hashes = extract_frame_hashes(path_str, info['duration'], info['nb_frames'], num_frames)
+        hashes = extract_frame_hashes(path_str, info['duration'], num_frames)
         if not hashes:
             if verbose:
                 print(f"    frame extraction failed", file=sys.stderr)

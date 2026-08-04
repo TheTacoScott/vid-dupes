@@ -4,3 +4,4 @@ __pycache__/
 .claude/
 populate_db.sh
 random_populate_db.sh
+bad-frames.sh
