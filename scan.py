@@ -153,11 +153,11 @@ def _seek_one_frame(path: str, timestamp: float) -> bytes | None:
         return None
 
 
-def extract_frame_hashes(path: str, duration: float, num_samples: int) -> list[int] | None:
+def extract_frame_hashes(path: str, duration: float, num_samples: int, workers: int = FFMPEG_WORKERS) -> list[int] | None:
     """
     Extract num_samples equally-spaced frames via parallel seeks and return their phash values.
 
-    Up to FFMPEG_WORKERS seeks run concurrently. Progress is tracked as futures return;
+    Up to `workers` seeks run concurrently. Progress is tracked as futures return;
     each individual seek is bounded by FRAME_IDLE_TIMEOUT.
     """
     interval = duration / num_samples if num_samples > 1 else duration
@@ -168,7 +168,7 @@ def extract_frame_hashes(path: str, duration: float, num_samples: int) -> list[i
     completed = 0
     start_time = time.monotonic()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=FFMPEG_WORKERS) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
         future_to_idx = {
             executor.submit(_seek_one_frame, path, t): i
             for i, t in enumerate(timestamps)
@@ -223,7 +223,8 @@ def find_video_files(paths: list[str], ignore: list[Path] | None = None):
             print(f"Warning: {p} does not exist, skipping.", file=sys.stderr)
 
 
-def scan_file(conn: sqlite3.Connection, path: Path, num_frames: int, verbose: bool) -> str:
+def scan_file(conn: sqlite3.Connection, path: Path, num_frames: int, verbose: bool,
+              workers: int = FFMPEG_WORKERS) -> str:
     """Scan one video. Returns: 'no_md5' | 'skipped' | 'added' | 'reused' | 'failed'"""
     if not _MD5_IN_FILENAME.search(path.name):
         return 'no_md5'
@@ -256,7 +257,7 @@ def scan_file(conn: sqlite3.Connection, path: Path, num_frames: int, verbose: bo
     ).fetchone() is not None
 
     if not has_hashes:
-        hashes = extract_frame_hashes(path_str, info['duration'], num_frames)
+        hashes = extract_frame_hashes(path_str, info['duration'], num_frames, workers)
         if not hashes:
             if verbose:
                 print(f"    frame extraction failed", file=sys.stderr)
@@ -303,6 +304,8 @@ def main():
                         help="Ignore files under this path (repeatable)")
     parser.add_argument('--shuffle', action='store_true',
                         help="Process files in random order instead of alphabetical")
+    parser.add_argument('--workers', type=int, default=FFMPEG_WORKERS,
+                        help=f"Concurrent ffmpeg seek processes per video (default: {FFMPEG_WORKERS})")
     parser.add_argument('-v', '--verbose', action='store_true',
                         help="Print per-file status details")
     args = parser.parse_args()
@@ -369,7 +372,7 @@ def main():
     for i, path in enumerate(videos, 1):
         print(f"[{i}/{len(videos)}] {path} ... ", end='', flush=True)
         file_start = time.monotonic()
-        status = scan_file(conn, path, args.frames, args.verbose)
+        status = scan_file(conn, path, args.frames, args.verbose, args.workers)
         counts[status] += 1
         if status not in ('skipped', 'reused', 'no_md5'):
             scan_times.append(time.monotonic() - file_start)
