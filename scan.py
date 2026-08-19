@@ -28,6 +28,7 @@ VIDEO_EXTENSIONS = {
 FRAME_SIZE         = 64  # pixels, square; phash operates on this
 FRAME_IDLE_TIMEOUT = 60  # seconds; per-seek ffmpeg timeout
 FFMPEG_WORKERS     = 4   # concurrent ffmpeg seek processes
+HIGH_RES_PIXELS    = 3840 * 2160  # 4K UHD; videos at/above this run seeks one at a time
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS videos (
@@ -257,7 +258,12 @@ def scan_file(conn: sqlite3.Connection, path: Path, num_frames: int, verbose: bo
     ).fetchone() is not None
 
     if not has_hashes:
-        hashes = extract_frame_hashes(path_str, info['duration'], num_frames, workers)
+        effective_workers = workers
+        if info['width'] and info['height'] and info['width'] * info['height'] >= HIGH_RES_PIXELS:
+            effective_workers = 1
+            if verbose:
+                print(f"    {info['width']}x{info['height']} is high-res, using 1 worker", file=sys.stderr)
+        hashes = extract_frame_hashes(path_str, info['duration'], num_frames, effective_workers)
         if not hashes:
             if verbose:
                 print(f"    frame extraction failed", file=sys.stderr)
