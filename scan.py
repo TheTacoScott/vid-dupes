@@ -203,6 +203,43 @@ def extract_frame_hashes(path: str, duration: float, num_samples: int, workers: 
     return None
 
 
+def resolve_true_case(path: Path, listdir_cache: dict) -> Path | None:
+    """Resolve an absolute path to its true on-disk casing, or None if missing.
+
+    On a case-insensitive filesystem (e.g. a CIFS/SMB mount to a Windows
+    share), Path.exists() can't distinguish "this exact path" from "some
+    differently-cased path with the same name" -- both succeed, because the
+    OS/server does the case-insensitive match transparently. That means a
+    file renamed only by case (Foo.mp4 -> foo.mp4) leaves the old DB row
+    looking like it still exists, so plain existence checks never clean it
+    up. This walks each path component against the real directory listing
+    to find the actual casing, so callers can detect the mismatch.
+
+    `listdir_cache` is a dict the caller reuses across calls so shared parent
+    directories are only listed once.
+    """
+    current = Path(path.root)
+    for part in path.parts[1:]:
+        if current in listdir_cache:
+            entries = listdir_cache[current]
+        else:
+            try:
+                entries = os.listdir(current)
+            except OSError:
+                entries = None
+            listdir_cache[current] = entries
+        if entries is None:
+            return None
+        if part not in entries:
+            lower = part.lower()
+            match = next((e for e in entries if e.lower() == lower), None)
+            if match is None:
+                return None
+            part = match
+        current = current / part
+    return current
+
+
 def find_video_files(paths: list[str], ignore: list[Path] | None = None):
     ignore = ignore or []
     for p in paths:
@@ -301,7 +338,9 @@ def main():
                         help="Max frames to sample per video (default: 100); "
                              "videos with fewer total frames capture all frames")
     parser.add_argument('--prune-videos', action='store_true',
-                        help="Remove video records for missing files, then exit")
+                        help="Remove video records for missing files (also reconciles "
+                             "records left stale by case-only renames on case-insensitive "
+                             "filesystems), then exit")
     parser.add_argument('--prune-hashes', action='store_true',
                         help="Remove frame hashes with no corresponding video record, then exit")
     parser.add_argument('--prune-all', action='store_true',
@@ -321,15 +360,36 @@ def main():
     if args.prune_videos or args.prune_all:
         all_known = conn.execute("SELECT id, path FROM videos").fetchall()
         print(f"Checking {len(all_known)} video record(s)...")
+        known_paths = {path for _, path in all_known}
+        listdir_cache: dict = {}
         removed = 0
+        fixed = 0
         for vid_id, path in all_known:
-            if not Path(path).exists():
+            true_path = resolve_true_case(Path(path), listdir_cache)
+            if true_path is None:
                 conn.execute("DELETE FROM videos WHERE id = ?", (vid_id,))
                 removed += 1
                 print(f"  removed (missing): {path}")
-        if removed:
+                continue
+            true_str = str(true_path)
+            if true_str == path:
+                continue
+            # Path exists case-insensitively but under a different real casing
+            # -- almost certainly a case-only rename on a case-insensitive fs.
+            if true_str in known_paths:
+                # A record with the correct casing already exists; this one is stale.
+                conn.execute("DELETE FROM videos WHERE id = ?", (vid_id,))
+                removed += 1
+                print(f"  removed (stale casing, superseded by {true_str}): {path}")
+            else:
+                conn.execute("UPDATE videos SET path = ? WHERE id = ?", (true_str, vid_id))
+                known_paths.discard(path)
+                known_paths.add(true_str)
+                fixed += 1
+                print(f"  fixed casing: {path} -> {true_str}")
+        if removed or fixed:
             conn.commit()
-        print(f"Removed {removed} missing video record(s).")
+        print(f"Removed {removed} missing/stale video record(s), fixed {fixed} casing mismatch(es).")
         if not args.prune_all:
             conn.close()
             return
