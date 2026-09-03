@@ -285,17 +285,10 @@ def main():
                 target_name = target_stem + Path(keep['path']).suffix
                 target_path = str(Path(d['path']).parent / target_name)
                 lines.append(f'# mv -v {shlex.quote(keep["path"])} {shlex.quote(target_path)}')
+            group_md5s = list(dict.fromkeys(v['md5'] for v in members))
+            lines.append('# MD5s above, for manage_non_matches.py:')
+            lines.append('# ' + ' '.join(group_md5s))
             lines.append('')
-
-        all_md5s = []
-        seen_md5s = set()
-        for group in groups:
-            for v in group_members(group):
-                if v['md5'] not in seen_md5s:
-                    seen_md5s.add(v['md5'])
-                    all_md5s.append(v['md5'])
-        lines.append('# All MD5s above, for manage_non_matches.py:')
-        lines.append('# ' + ' '.join(all_md5s))
 
         lines += ['']
 
