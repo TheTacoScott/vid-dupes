@@ -287,6 +287,16 @@ def main():
                 lines.append(f'# mv -v {shlex.quote(keep["path"])} {shlex.quote(target_path)}')
             lines.append('')
 
+        all_md5s = []
+        seen_md5s = set()
+        for group in groups:
+            for v in group_members(group):
+                if v['md5'] not in seen_md5s:
+                    seen_md5s.add(v['md5'])
+                    all_md5s.append(v['md5'])
+        lines.append('# All MD5s above, for manage_non_matches.py:')
+        lines.append('# ' + ' '.join(all_md5s))
+
         lines += ['']
 
         script = '\n'.join(lines)
