@@ -7,6 +7,7 @@ import re
 import shlex
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 _MD5_RE = re.compile(r'\[[0-9a-f]{32}\]', re.IGNORECASE)
@@ -101,6 +102,17 @@ def merge_groups(pairs: list[tuple[int, int]]) -> list[set[int]]:
     return groups
 
 
+def fmt_eta(secs: float) -> str:
+    if secs < 60:
+        return f"{int(secs)}s"
+    elif secs < 3600:
+        m, s = divmod(int(secs), 60)
+        return f"{m}m {s:02d}s"
+    else:
+        h, rem = divmod(int(secs), 3600)
+        return f"{h}h {rem // 60:02d}m"
+
+
 def fmt_size(n: int | None) -> str:
     if n is None:
         return '?'
@@ -182,28 +194,40 @@ def main():
     dupe_pairs: list[tuple[int, int]] = []
     pair_stats: dict[frozenset, dict] = {}
 
-    for a, b in pairs:
+    total_pairs = len(pairs)
+    start_time = time.monotonic()
+    last_print = 0.0
+    for pi, (a, b) in enumerate(pairs, 1):
         dur_diff = abs(a['duration'] - b['duration'])
 
         if a['md5'] == b['md5']:
             key = frozenset({a['id'], b['id']})
             dupe_pairs.append((a['id'], b['id']))
             pair_stats[key] = {'match_type': 'md5', 'hamming': None, 'dur_diff': dur_diff}
-            continue
+        elif a['md5'] and b['md5'] and frozenset({a['md5'], b['md5']}) in excluded_pairs:
+            pass
+        else:
+            ha = all_hashes.get(a['md5'], [])
+            hb = all_hashes.get(b['md5'], [])
+            if len(ha) >= args.min_frames and len(hb) >= args.min_frames:
+                dist = mean_hamming(ha, hb, args.hamming)
+                if dist is not None and dist <= args.hamming:
+                    key = frozenset({a['id'], b['id']})
+                    dupe_pairs.append((a['id'], b['id']))
+                    pair_stats[key] = {'match_type': 'phash', 'hamming': dist, 'dur_diff': dur_diff}
 
-        if a['md5'] and b['md5'] and frozenset({a['md5'], b['md5']}) in excluded_pairs:
-            continue
-
-        ha = all_hashes.get(a['md5'], [])
-        hb = all_hashes.get(b['md5'], [])
-        if len(ha) < args.min_frames or len(hb) < args.min_frames:
-            continue
-
-        dist = mean_hamming(ha, hb, args.hamming)
-        if dist is not None and dist <= args.hamming:
-            key = frozenset({a['id'], b['id']})
-            dupe_pairs.append((a['id'], b['id']))
-            pair_stats[key] = {'match_type': 'phash', 'hamming': dist, 'dur_diff': dur_diff}
+        now = time.monotonic()
+        if now - last_print >= 0.1 or pi == total_pairs:
+            elapsed = now - start_time
+            rate = pi / elapsed if elapsed > 0 else 0.0
+            remaining = total_pairs - pi
+            eta = fmt_eta(remaining / rate) if rate > 0 and remaining > 0 else ''
+            eta_part = f'  eta {eta}' if eta else ''
+            pct = pi / total_pairs * 100
+            print(f'\r  comparing {pi}/{total_pairs}  ({pct:.2f}%)  ({rate:.0f}/s)  matches {len(dupe_pairs)}{eta_part}\033[K',
+                  end='', flush=True, file=sys.stderr)
+            last_print = now
+    print(file=sys.stderr)
 
     if not dupe_pairs:
         print("No duplicates found.")
