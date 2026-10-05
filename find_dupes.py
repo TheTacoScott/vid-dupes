@@ -194,6 +194,26 @@ def main():
     dupe_pairs: list[tuple[int, int]] = []
     pair_stats: dict[frozenset, dict] = {}
 
+    parent: dict[int, int] = {}
+    n_groups = 0
+
+    def find(x: int) -> int:
+        nonlocal n_groups
+        if x not in parent:
+            parent[x] = x
+            n_groups += 1
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def link(x: int, y: int) -> None:
+        nonlocal n_groups
+        rx, ry = find(x), find(y)
+        if rx != ry:
+            parent[rx] = ry
+            n_groups -= 1
+
     total_pairs = len(pairs)
     start_time = time.monotonic()
     last_print = 0.0
@@ -216,6 +236,9 @@ def main():
                     dupe_pairs.append((a['id'], b['id']))
                     pair_stats[key] = {'match_type': 'phash', 'hamming': dist, 'dur_diff': dur_diff}
 
+        if dupe_pairs and dupe_pairs[-1] == (a['id'], b['id']):
+            link(a['id'], b['id'])
+
         now = time.monotonic()
         if now - last_print >= 0.1 or pi == total_pairs:
             elapsed = now - start_time
@@ -224,7 +247,7 @@ def main():
             eta = fmt_eta(remaining / rate) if rate > 0 and remaining > 0 else ''
             eta_part = f'  eta {eta}' if eta else ''
             pct = pi / total_pairs * 100
-            print(f'\r  comparing {pi}/{total_pairs}  ({pct:.2f}%)  ({rate:.0f}/s)  matches {len(dupe_pairs)}{eta_part}\033[K',
+            print(f'\r  comparing {pi}/{total_pairs}  ({pct:.2f}%)  ({rate:.0f}/s)  groups {n_groups}{eta_part}\033[K',
                   end='', flush=True, file=sys.stderr)
             last_print = now
     print(file=sys.stderr)
